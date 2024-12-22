@@ -3,3 +3,4 @@ logger.py
 *.log
 *plots/
 *.png
+.vscode
