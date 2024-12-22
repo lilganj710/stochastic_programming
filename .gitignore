@@ -1,0 +1,5 @@
+__pycache__/
+logger.py
+*.log
+*plots/
+*.png
