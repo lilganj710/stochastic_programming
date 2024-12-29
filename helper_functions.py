@@ -7,14 +7,15 @@ T = TypeVar('T')
 
 
 def timing(func: Callable[..., T], use_logger: bool = False
-           ) -> Callable[..., tuple[T, float]]:
-    '''Decorator for timing a function. Return both the original
-    function return value and the execution time'''
-
+           ) -> Callable[..., T]:
+    '''Decorator for timing a function. Run the function, recording
+    execution time. Return the original return value, print the
+    execution time'''
     def wrapper(*args: Any, **kwargs: Any):
         start = time.perf_counter()
         ret_val = func(*args, **kwargs)
         end = time.perf_counter()
         elapsed_time = end - start
-        return ret_val, elapsed_time
+        print(f'{func.__name__} took {elapsed_time}s')
+        return ret_val
     return wrapper

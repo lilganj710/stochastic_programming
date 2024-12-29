@@ -9,7 +9,9 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.append('C:/stochastic_programming')
 from StochasticFrankWolfe import StochasticFrankWolfe  # noqa: E402
+from ProjectedSGD import ProjectedSGD  # noqa: E402
 from logger import get_logger  # noqa: E402
+from helper_functions import timing  # noqa: E402
 
 
 def true_function(x: npt.NDArray[np.float64],
@@ -57,51 +59,39 @@ def stochastic_sampler(num_samples: int,
 
 def satisfies_constraints(
         grid: npt.NDArray[np.float64],
-        A: npt.NDArray[np.float64], b: npt.NDArray[np.float64],
-        box_constraints: tuple[float | None, float | None],
+        d: npt.NDArray[np.float64], w: float,
         ) -> npt.NDArray[np.bool_]:
     '''Given a grid of points, let return[i, j] = True iff the point
     at grid[i, j, :] falls within the given constraints
 
     :param grid: .shape = (x discretization, y discretization, 2)
-    :param A: polyhedron matrix of the set {x | Ax <= b}
-    :param b: see above
-    :param box_constraints: specifies the (optional) endpoints of the
-        box constraints {x | l <= x <= h}
+    :param d: vector of the set {x | d @ x <= w, x >= 0}
+    :param w: see above
     :return: return[i, j] = True iff the point
         at grid[i, j, :] falls within the given constraints
     '''
-    iterate_dim = A.shape[1]
-    A_grid = np.squeeze(A @ grid[..., None], axis=-1)
-    in_polyhedron: npt.NDArray[np.bool_] = np.all(A_grid <= b, axis=-1)
-    logger.debug(f'{A_grid.shape=}, {in_polyhedron.shape=}')
-    lower_box, upper_box = box_constraints
-    lower_box = float('-inf') if lower_box is None else lower_box
-    upper_box = float('-inf') if upper_box is None else upper_box
-    in_box = np.all(
-        (np.full(iterate_dim, lower_box) <= grid)
-        & (grid <= np.full(iterate_dim, upper_box)),
-        axis=-1
-    )
-    return in_polyhedron & in_box
+    d_grid = np.squeeze(d @ grid[..., None], axis=-1)
+    logger.debug(f'{d_grid.shape=}')
+    constraints_satisfied: npt.NDArray[np.bool_] = np.all(
+        grid >= 0, axis=-1) & (d_grid <= w)
+    return constraints_satisfied
 
 
 def plot_iterates_on_contour(
         iterate_histories: dict[str, npt.NDArray[np.float64]],
-        A: npt.NDArray[np.float64], b: npt.NDArray[np.float64],
-        box_constraints: tuple[float | None, float | None],
+        d: npt.NDArray[np.float64], w: float,
         sampling_dist: ss.rv_continuous,
-        x_lim: tuple[float, float] = (-2, 2),
-        y_lim: tuple[float, float] = (-2, 2)):
+        x_lim: tuple[float, float] = (0, 1),
+        y_lim: tuple[float, float] = (0, 1)):
     '''Make a contour plot of the true function along with the
-    constraint set {x | Ax <= b}\n
+    constraint set {x | d @ x <= w, x >= 0}\n
     Then, plot iterate histories, where each is keyed by a string
         that references its hyperparam combo
 
     :param sampling_dist: needed to get moments for the true_function
     :param x_lim: limits of the x coordinate domain
     :param y_lim: limits of the y coordinate domain'''
-    iterate_dim = A.shape[1]
+    iterate_dim = len(d)
     if iterate_dim != 2:
         print('plot_iterates_on_contour only meant for 2D iterates...'
               f'{iterate_dim=}')
@@ -113,7 +103,7 @@ def plot_iterates_on_contour(
     X, Y = np.meshgrid(x_space, y_space)
     grid = np.dstack((X, Y))
 
-    constraints_satisfied = satisfies_constraints(grid, A, b, box_constraints)
+    constraints_satisfied = satisfies_constraints(grid, d, w)
     ax.contourf(X, Y, constraints_satisfied, levels=[1-1e-7, 1+1e-7],
                 colors=['lightblue'])
 
@@ -165,32 +155,39 @@ def plot_convergence_to_optimal(
 
 
 def main():
-    ITERATE_DIM = 100
+    ITERATE_DIM = 2
 
-    A = np.ones(ITERATE_DIM)[None, :]
-    b = np.array([1])
-    logger.debug(f'A={A},\n{b=}')
-    box_constraints = (-1, 1)
-    sampling_dist: ss.rv_continuous = ss.norm()  # type: ignore
+    d = np.ones(ITERATE_DIM)
+    w = 1
+
+    sampling_dist: ss.rv_continuous = ss.norm(0.2, 1)  # type: ignore
     stochastic_sampling_func = ft.partial(
         stochastic_sampler, sampling_dist=sampling_dist,
         ndim=ITERATE_DIM)
 
+    x_0 = np.insert(np.zeros(ITERATE_DIM-1), 0, 1)
+    # x_0 = np.full(ITERATE_DIM, 0.5)
+
     sfw_instance = StochasticFrankWolfe(
-        A, b, box_constraints, gradient_func, stochastic_sampling_func)
-    x_0 = np.full(ITERATE_DIM, -1)
-    iterate_history = sfw_instance.iterate_from(
-        x_0, batch_size=10, num_iters=(n_iters := 1000))
+        d, w, gradient_func, stochastic_sampling_func)
+    pg_instance = ProjectedSGD(
+        d, w, gradient_func, stochastic_sampling_func)
+
+    iterate_history = timing(sfw_instance.iterate_from)(
+        x_0, batch_size=10, num_iters=(n_iters := 100))
     logger.debug(f'iterate_history=\n{iterate_history}')
-    large_batch_iterate_history = sfw_instance.iterate_from(
-        x_0, batch_size=1_000, num_iters=n_iters)
+    large_batch_iterate_history = timing(sfw_instance.iterate_from)(
+        x_0, batch_size=1000, num_iters=n_iters)
+    large_batch_pg_hist = timing(pg_instance.iterate_from)(
+        x_0, batch_size=1000, num_iters=n_iters)
 
     iterate_histories = {
         'vanilla': iterate_history,
         'large_batch': large_batch_iterate_history,
+        'large_batch_pg': large_batch_pg_hist,
     }
     plot_iterates_on_contour(
-        iterate_histories, A, b, box_constraints, sampling_dist)
+        iterate_histories, d, w, sampling_dist)
     plot_convergence_to_optimal(iterate_histories, sampling_dist)
     plt.show()
 

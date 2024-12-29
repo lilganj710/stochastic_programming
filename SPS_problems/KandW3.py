@@ -164,13 +164,12 @@ def main():
     problem_params = simulate_data(
         rng, num_materials=5, num_products=6, num_time_periods=7,
         num_demand_scenarios=100)
-    val_and_x_star, exec_time = timing(
+    val_and_x_star = timing(
         solve_w_cvxpy)(*astuple(problem_params))
     objective_value, x_star = val_and_x_star
     np.set_printoptions(precision=4, suppress=True)
     print(f'{objective_value=}')
     print(f'x_star=\n{x_star}')
-    print(f'solve_w_cvxpy {exec_time=}s')
     empirical_objective = get_empirical_objective(
         x_star, *astuple(problem_params))
     print(f'{empirical_objective=}')
