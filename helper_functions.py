@@ -16,6 +16,6 @@ def timing(func: Callable[..., T], use_logger: bool = False
         ret_val = func(*args, **kwargs)
         end = time.perf_counter()
         elapsed_time = end - start
-        print(f'{func.__name__} took {elapsed_time}s')
+        print(f'{func.__qualname__} took {elapsed_time}s')
         return ret_val
     return wrapper

@@ -160,7 +160,7 @@ def main():
     d = np.ones(ITERATE_DIM)
     w = 1
 
-    sampling_dist: ss.rv_continuous = ss.norm(0.2, 1)  # type: ignore
+    sampling_dist: ss.rv_continuous = ss.norm(0.5, 1)  # type: ignore
     stochastic_sampling_func = ft.partial(
         stochastic_sampler, sampling_dist=sampling_dist,
         ndim=ITERATE_DIM)
@@ -171,20 +171,27 @@ def main():
     sfw_instance = StochasticFrankWolfe(
         d, w, gradient_func, stochastic_sampling_func)
     pg_instance = ProjectedSGD(
-        d, w, gradient_func, stochastic_sampling_func)
+        d, w, gradient_func, stochastic_sampling_func,
+        project_search_direction=False)
+    pg_instance_on_sd = ProjectedSGD(
+        d, w, gradient_func, stochastic_sampling_func,
+        project_search_direction=True)
 
     iterate_history = timing(sfw_instance.iterate_from)(
-        x_0, batch_size=10, num_iters=(n_iters := 100))
+        x_0, batch_size=10, num_iters=(n_iters := 5000))
     logger.debug(f'iterate_history=\n{iterate_history}')
     large_batch_iterate_history = timing(sfw_instance.iterate_from)(
         x_0, batch_size=1000, num_iters=n_iters)
     large_batch_pg_hist = timing(pg_instance.iterate_from)(
-        x_0, batch_size=1000, num_iters=n_iters)
+        x_0, batch_size=(pg_batch_size := 1000), num_iters=n_iters)
+    large_batch_pg_hist_sd = timing(pg_instance_on_sd.iterate_from)(
+        x_0, batch_size=pg_batch_size, num_iters=n_iters)
 
     iterate_histories = {
         'vanilla': iterate_history,
         'large_batch': large_batch_iterate_history,
         'large_batch_pg': large_batch_pg_hist,
+        'large_batch_pg_sd_projection': large_batch_pg_hist_sd,
     }
     plot_iterates_on_contour(
         iterate_histories, d, w, sampling_dist)
