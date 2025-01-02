@@ -99,7 +99,7 @@ class StochasticFrankWolfe:
             stochastic_samples = self.stochastic_sampler(batch_size)
             gradient_components = self.gradient_func(x_k, stochastic_samples)
             avg_gradient = np.mean(gradient_components, axis=0)
-            self.logger.debug(f'{avg_gradient=}')
+            # self.logger.debug(f'{avg_gradient=}')
             sfw_vector = self.knapsack_lp_solve(-avg_gradient, self.d, self.w)
             # cur_stepsize = self.binary_search_stepsize(
             #     x_k, sfw_vector, stochastic_samples)

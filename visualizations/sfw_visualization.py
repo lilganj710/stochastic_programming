@@ -1,6 +1,7 @@
 '''Visualize iterates of the stochastic Frank-Wolfe algo in a
 low-dimensional setting'''
 import functools as ft
+from typing import Callable
 import numpy as np
 import numpy.typing as npt
 import scipy.stats as ss  # type: ignore
@@ -154,20 +155,21 @@ def plot_convergence_to_optimal(
     ax2.set_yscale('log')
 
 
-def main():
-    ITERATE_DIM = 2
+def get_sfw_vs_pg_iterate_histories(
+        d: npt.NDArray[np.float64], w: float,
+        x_0: npt.NDArray[np.float64],
+        stochastic_sampling_func: Callable[[int], npt.NDArray[np.float64]]
+        ) -> dict[str, npt.NDArray[np.float64]]:
+    '''Return iterate histories to compare Stochastic Frank Wolfe convergence
+    with Projected Stochastic Gradient Descent convergence
 
-    d = np.ones(ITERATE_DIM)
-    w = 1
-
-    sampling_dist: ss.rv_continuous = ss.norm(0.5, 1)  # type: ignore
-    stochastic_sampling_func = ft.partial(
-        stochastic_sampler, sampling_dist=sampling_dist,
-        ndim=ITERATE_DIM)
-
-    x_0 = np.insert(np.zeros(ITERATE_DIM-1), 0, 1)
-    # x_0 = np.full(ITERATE_DIM, 0.5)
-
+    :param d: vector in {x | d @ x <= w}
+    :param w: scalar in {x | d @ x <= w}
+    :param x_0: initial iterate
+    :param stochastic_sampling_func: function that takes in the number of
+            samples, returns samples of the stochastic component
+    :return: dict of (plot label, iterate history)
+    '''
     sfw_instance = StochasticFrankWolfe(
         d, w, gradient_func, stochastic_sampling_func)
     pg_instance = ProjectedSGD(
@@ -181,9 +183,9 @@ def main():
         x_0, batch_size=10, num_iters=(n_iters := 5000))
     logger.debug(f'iterate_history=\n{iterate_history}')
     large_batch_iterate_history = timing(sfw_instance.iterate_from)(
-        x_0, batch_size=1000, num_iters=n_iters)
+        x_0, batch_size=100, num_iters=n_iters)
     large_batch_pg_hist = timing(pg_instance.iterate_from)(
-        x_0, batch_size=(pg_batch_size := 1000), num_iters=n_iters)
+        x_0, batch_size=(pg_batch_size := 100), num_iters=n_iters)
     large_batch_pg_hist_sd = timing(pg_instance_on_sd.iterate_from)(
         x_0, batch_size=pg_batch_size, num_iters=n_iters)
 
@@ -193,6 +195,57 @@ def main():
         'large_batch_pg': large_batch_pg_hist,
         'large_batch_pg_sd_projection': large_batch_pg_hist_sd,
     }
+    return iterate_histories
+
+
+def get_pg_stepsizes_iterate_histories(
+        d: npt.NDArray[np.float64], w: float,
+        x_0: npt.NDArray[np.float64],
+        stochastic_sampling_func: Callable[[int], npt.NDArray[np.float64]]
+        ) -> dict[str, npt.NDArray[np.float64]]:
+    '''Return iterate histories to compare convergence of different stepsize
+    rules for Projected Stochastic Gradient Descent
+
+    :return: dict of (plot label, iterate history)
+    '''
+    pg_instance_1t_stepsize = ProjectedSGD(
+        d, w, gradient_func, stochastic_sampling_func,
+        one_over_t_stepsize=True)
+    pg_instance_other_stepsize = ProjectedSGD(
+        d, w, gradient_func, stochastic_sampling_func,
+        one_over_t_stepsize=False)
+
+    iterate_histories = [
+        timing(inst.iterate_from)(x_0, batch_size=10, num_iters=5000)
+        for inst in [pg_instance_1t_stepsize, pg_instance_other_stepsize]
+    ]
+    iterate_histories = {
+        '1/t stepsize': iterate_histories[0],
+        'other stepsize': iterate_histories[1],
+    }
+
+    return iterate_histories
+
+
+def main():
+    ITERATE_DIM = 25
+
+    d = np.ones(ITERATE_DIM)
+    w = 1
+
+    sampling_dist: ss.rv_continuous = \
+        ss.t(df=4, loc=1/(ITERATE_DIM*2), scale=1)  # type: ignore
+    stochastic_sampling_func = ft.partial(
+        stochastic_sampler, sampling_dist=sampling_dist,
+        ndim=ITERATE_DIM)
+
+    x_0 = np.insert(np.zeros(ITERATE_DIM-1), 0, 1)
+    # x_0 = np.full(ITERATE_DIM, 0.5)
+
+    # iterate_histories = get_sfw_vs_pg_iterate_histories(
+    #     d, w, x_0, stochastic_sampling_func)
+    iterate_histories = get_pg_stepsizes_iterate_histories(
+        d, w, x_0, stochastic_sampling_func)
     plot_iterates_on_contour(
         iterate_histories, d, w, sampling_dist)
     plot_convergence_to_optimal(iterate_histories, sampling_dist)

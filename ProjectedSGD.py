@@ -15,6 +15,7 @@ class ProjectedSGD:
                                      npt.NDArray[np.float64]],
                                     npt.NDArray[np.float64]],
                  stochastic_sampler: Callable[[int], npt.NDArray[np.float64]],
+                 one_over_t_stepsize: bool = False,
                  project_search_direction: bool = False):
         '''Given that our domain is {x | d @ x <= w, x >= 0}
 
@@ -25,6 +26,8 @@ class ProjectedSGD:
             of the objective wrt x for each sample
         :param stochastic_sampler: function that takes in the number of
             samples, returns samples of the stochastic component
+        :param one_over_t_stepsize: if True, use a 1/t stepsize. Else, try
+            something else (TODO: make an Enum of valid stepsize rules)
         :param project_search_direction: if True, project the search direction
             onto the feasible set instead of projecting the iterate directly\n
             See https://tinyurl.com/2-projected-sgd-approaches for more info
@@ -43,6 +46,7 @@ class ProjectedSGD:
         '''if True, project the search direction onto the feasible set instead
         of projecting the iterate directly\n
         See https://tinyurl.com/2-projected-sgd-approaches for more info'''
+        self.one_over_t_stepsize = one_over_t_stepsize
 
     def project_onto_halfspace(
             self, y: npt.NDArray[np.float64],
@@ -75,6 +79,13 @@ class ProjectedSGD:
                 break
         return x_i
 
+    def get_cur_stepsize(self, cur_iter: int) -> float:
+        '''Given the cur_iter number, return the current stepsize\n
+        For now, this is either a 1/t stepsize or something else'''
+        if self.one_over_t_stepsize:
+            return 1 / (cur_iter + 1)
+        return 0.02
+
     def iterate_from(self, x_0: npt.NDArray[np.float64],
                      batch_size: int = 10, num_iters: int = 50
                      ) -> npt.NDArray[np.float64]:
@@ -90,8 +101,8 @@ class ProjectedSGD:
             stochastic_samples = self.stochastic_sampler(batch_size)
             gradient_components = self.gradient_func(x_k, stochastic_samples)
             avg_gradient = np.mean(gradient_components, axis=0)
-            self.logger.debug(f'{avg_gradient=}')
-            cur_stepsize = 2 / (cur_iter + 2)
+            # self.logger.debug(f'{avg_gradient=}')
+            cur_stepsize = self.get_cur_stepsize(cur_iter)
             if self.project_search_direction:
                 d_k = self.run_alternating_projections_on(
                     x_k-avg_gradient, self.d, self.w) - x_k
