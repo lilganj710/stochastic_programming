@@ -173,11 +173,7 @@ def get_sfw_vs_pg_iterate_histories(
     sfw_instance = StochasticFrankWolfe(
         d, w, gradient_func, stochastic_sampling_func)
     pg_instance = ProjectedSGD(
-        d, w, gradient_func, stochastic_sampling_func,
-        project_search_direction=False)
-    pg_instance_on_sd = ProjectedSGD(
-        d, w, gradient_func, stochastic_sampling_func,
-        project_search_direction=True)
+        d, w, gradient_func, stochastic_sampling_func)
 
     iterate_history = timing(sfw_instance.iterate_from)(
         x_0, batch_size=10, num_iters=(n_iters := 5000))
@@ -185,15 +181,12 @@ def get_sfw_vs_pg_iterate_histories(
     large_batch_iterate_history = timing(sfw_instance.iterate_from)(
         x_0, batch_size=100, num_iters=n_iters)
     large_batch_pg_hist = timing(pg_instance.iterate_from)(
-        x_0, batch_size=(pg_batch_size := 100), num_iters=n_iters)
-    large_batch_pg_hist_sd = timing(pg_instance_on_sd.iterate_from)(
-        x_0, batch_size=pg_batch_size, num_iters=n_iters)
+        x_0, batch_size=100, num_iters=n_iters)
 
     iterate_histories = {
         'vanilla': iterate_history,
         'large_batch': large_batch_iterate_history,
         'large_batch_pg': large_batch_pg_hist,
-        'large_batch_pg_sd_projection': large_batch_pg_hist_sd,
     }
     return iterate_histories
 

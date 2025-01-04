@@ -15,8 +15,7 @@ class ProjectedSGD:
                                      npt.NDArray[np.float64]],
                                     npt.NDArray[np.float64]],
                  stochastic_sampler: Callable[[int], npt.NDArray[np.float64]],
-                 one_over_t_stepsize: bool = False,
-                 project_search_direction: bool = False):
+                 one_over_t_stepsize: bool = False,):
         '''Given that our domain is {x | d @ x <= w, x >= 0}
 
         :param d: param vector for the above constraint
@@ -28,9 +27,6 @@ class ProjectedSGD:
             samples, returns samples of the stochastic component
         :param one_over_t_stepsize: if True, use a 1/t stepsize. Else, try
             something else (TODO: make an Enum of valid stepsize rules)
-        :param project_search_direction: if True, project the search direction
-            onto the feasible set instead of projecting the iterate directly\n
-            See https://tinyurl.com/2-projected-sgd-approaches for more info
         '''
         self.logger = logging.getLogger('__main__')
         self.d = d
@@ -42,10 +38,6 @@ class ProjectedSGD:
         self.first_order_suboptimality_bound = 1e-5
         '''early termination condition based on the first-order condition
         for convexity (Ding & Udell, p4)'''
-        self.project_search_direction = project_search_direction
-        '''if True, project the search direction onto the feasible set instead
-        of projecting the iterate directly\n
-        See https://tinyurl.com/2-projected-sgd-approaches for more info'''
         self.one_over_t_stepsize = one_over_t_stepsize
 
     def project_onto_halfspace(
@@ -103,12 +95,7 @@ class ProjectedSGD:
             avg_gradient = np.mean(gradient_components, axis=0)
             # self.logger.debug(f'{avg_gradient=}')
             cur_stepsize = self.get_cur_stepsize(cur_iter)
-            if self.project_search_direction:
-                d_k = self.run_alternating_projections_on(
-                    x_k-avg_gradient, self.d, self.w) - x_k
-                x_k = x_k + cur_stepsize * d_k
-            else:
-                x_k = x_k - cur_stepsize * avg_gradient
-                x_k = self.run_alternating_projections_on(x_k, self.d, self.w)
+            x_k = x_k - cur_stepsize * avg_gradient
+            x_k = self.run_alternating_projections_on(x_k, self.d, self.w)
             iterate_hist_list.append(x_k)
         return np.array(iterate_hist_list)
