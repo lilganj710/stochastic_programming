@@ -3,6 +3,9 @@ from typing import Callable
 import numpy as np
 import numpy.typing as npt
 
+from stepsize_rules.projected_SGD_stepsizes import ProjectedSGDStepsize
+from subclass_instantiation import get_class_instance
+
 
 class ProjectedSGD:
     '''Instead of solving the Stochastic Frank-Wolfe linear program at every
@@ -15,7 +18,7 @@ class ProjectedSGD:
                                      npt.NDArray[np.float64]],
                                     npt.NDArray[np.float64]],
                  stochastic_sampler: Callable[[int], npt.NDArray[np.float64]],
-                 one_over_t_stepsize: bool = False,):
+                 stepsize_class_name: str = 'OneOverTStepsize'):
         '''Given that our domain is {x | d @ x <= w, x >= 0}
 
         :param d: param vector for the above constraint
@@ -25,8 +28,9 @@ class ProjectedSGD:
             of the objective wrt x for each sample
         :param stochastic_sampler: function that takes in the number of
             samples, returns samples of the stochastic component
-        :param one_over_t_stepsize: if True, use a 1/t stepsize. Else, try
-            something else (TODO: make an Enum of valid stepsize rules)
+        :param stepsize_class_name: of the form "class_name(kwargs)"
+            Gets parsed by a helper function to yield a subclass that
+            implements a stepsize rule
         '''
         self.logger = logging.getLogger('__main__')
         self.d = d
@@ -38,7 +42,8 @@ class ProjectedSGD:
         self.first_order_suboptimality_bound = 1e-5
         '''early termination condition based on the first-order condition
         for convexity (Ding & Udell, p4)'''
-        self.one_over_t_stepsize = one_over_t_stepsize
+        self.stepsize_class = get_class_instance(
+            stepsize_class_name, ProjectedSGDStepsize)
 
     def project_onto_halfspace(
             self, y: npt.NDArray[np.float64],
@@ -71,13 +76,6 @@ class ProjectedSGD:
                 break
         return x_i
 
-    def get_cur_stepsize(self, cur_iter: int) -> float:
-        '''Given the cur_iter number, return the current stepsize\n
-        For now, this is either a 1/t stepsize or something else'''
-        if self.one_over_t_stepsize:
-            return 1 / (cur_iter + 1)
-        return 0.02
-
     def iterate_from(self, x_0: npt.NDArray[np.float64],
                      batch_size: int = 10, num_iters: int = 50
                      ) -> npt.NDArray[np.float64]:
@@ -94,7 +92,9 @@ class ProjectedSGD:
             gradient_components = self.gradient_func(x_k, stochastic_samples)
             avg_gradient = np.mean(gradient_components, axis=0)
             # self.logger.debug(f'{avg_gradient=}')
-            cur_stepsize = self.get_cur_stepsize(cur_iter)
+            cur_stepsize = self.stepsize_class.get_stepsize(
+                cur_iter, avg_gradient)
+            self.logger.debug(f'{cur_stepsize=}')
             x_k = x_k - cur_stepsize * avg_gradient
             x_k = self.run_alternating_projections_on(x_k, self.d, self.w)
             iterate_hist_list.append(x_k)

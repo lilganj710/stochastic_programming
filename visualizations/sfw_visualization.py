@@ -201,22 +201,17 @@ def get_pg_stepsizes_iterate_histories(
 
     :return: dict of (plot label, iterate history)
     '''
-    pg_instance_1t_stepsize = ProjectedSGD(
-        d, w, gradient_func, stochastic_sampling_func,
-        one_over_t_stepsize=True)
-    pg_instance_other_stepsize = ProjectedSGD(
-        d, w, gradient_func, stochastic_sampling_func,
-        one_over_t_stepsize=False)
-
-    iterate_histories = [
-        timing(inst.iterate_from)(x_0, batch_size=10, num_iters=5000)
-        for inst in [pg_instance_1t_stepsize, pg_instance_other_stepsize]
+    stepsize_class_names = [
+        'OneOverTStepsize',
+        'MultivariateKestenStepsize'
     ]
-    iterate_histories = {
-        '1/t stepsize': iterate_histories[0],
-        'other stepsize': iterate_histories[1],
-    }
-
+    iterate_histories: dict[str, npt.NDArray[np.float64]] = {}
+    for stepsize_class_name in stepsize_class_names:
+        pg_instance = ProjectedSGD(
+            d, w, gradient_func, stochastic_sampling_func)
+        cur_hist = timing(pg_instance.iterate_from)(
+            x_0, batch_size=10, num_iters=5000)
+        iterate_histories[stepsize_class_name] = cur_hist
     return iterate_histories
 
 
