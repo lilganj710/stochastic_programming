@@ -11,6 +11,7 @@ import sys
 sys.path.append('C:/stochastic_programming')
 from StochasticFrankWolfe import StochasticFrankWolfe  # noqa: E402
 from ProjectedSGD import ProjectedSGD  # noqa: E402
+from StochasticNewton import StochasticNewton  # noqa: E402
 from logger import get_logger  # noqa: E402
 from helper_functions import timing  # noqa: E402
 
@@ -38,11 +39,24 @@ def gradient_func(iterate: npt.NDArray[np.float64],
                   ) -> npt.NDArray[np.float64]:
     '''Objective: min f(x) = E[(x - W)^T(x - W)], where x is our optimization
     variable and W is our vector random variable\n
-    del_f(x) = E[x - W] (see Wikipedia matrix calculus identities)
+    del_f(x) = E[2*(x - W)] (see Wikipedia matrix calculus identities)
 
     :return: .shape = (len(stochastic_samples), len(iterate))
         The above gradient for each sample'''
     return 2 * (iterate - stochastic_samples)
+
+
+def hessian_func(iterate: npt.NDArray[np.float64],
+                 stochastic_samples: npt.NDArray[np.float64]
+                 ) -> npt.NDArray[np.float64]:
+    '''Given that same min f(x) = E[(x - W)^T(x - W)], compute
+    the Hessian f''(x)\n
+    Not much "computation"; it's just 2*I. Just make sure to
+    broadcast this appropriately:
+
+    :return: .shape = (len(stochastic_samples), len(iterate), len(iterate))'''
+    single_eye = np.eye(len(iterate))
+    return np.tile(single_eye, (len(stochastic_samples), 1, 1))
 
 
 def stochastic_sampler(num_samples: int,
@@ -210,8 +224,31 @@ def get_pg_stepsizes_iterate_histories(
         pg_instance = ProjectedSGD(
             d, w, gradient_func, stochastic_sampling_func)
         cur_hist = timing(pg_instance.iterate_from)(
-            x_0, batch_size=10, num_iters=5000)
+            x_0, batch_size=100, num_iters=5000)
         iterate_histories[stepsize_class_name] = cur_hist
+    return iterate_histories
+
+
+def get_pg_v_newton_iterate_histories(
+        d: npt.NDArray[np.float64], w: float,
+        x_0: npt.NDArray[np.float64],
+        stochastic_sampling_func: Callable[[int], npt.NDArray[np.float64]]
+        ) -> dict[str, npt.NDArray[np.float64]]:
+    '''Return iterate histories to compare Projected SGD with
+    Projected Newton's'''
+    pg_instance = ProjectedSGD(
+        d, w, gradient_func, stochastic_sampling_func)
+    newton_instance = StochasticNewton(
+        d, w, gradient_func, hessian_func, stochastic_sampling_func
+    )
+    pg_hist = timing(pg_instance.iterate_from)(
+        x_0, batch_size=10, num_iters=5000)
+    newton_hist = timing(newton_instance.iterate_from)(
+        x_0, batch_size=10, num_iters=5000)
+    iterate_histories = {
+        'Projected SGD': pg_hist,
+        'Projected Newton': newton_hist,
+    }
     return iterate_histories
 
 
@@ -234,6 +271,9 @@ def main():
     #     d, w, x_0, stochastic_sampling_func)
     iterate_histories = get_pg_stepsizes_iterate_histories(
         d, w, x_0, stochastic_sampling_func)
+    # iterate_histories = get_pg_v_newton_iterate_histories(
+    #     d, w, x_0, stochastic_sampling_func)
+
     plot_iterates_on_contour(
         iterate_histories, d, w, sampling_dist)
     plot_convergence_to_optimal(iterate_histories, sampling_dist)
