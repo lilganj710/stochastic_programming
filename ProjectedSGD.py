@@ -64,17 +64,17 @@ class ProjectedSGD:
     def run_alternating_projections_on(
             self, x_i: npt.NDArray[np.float64],
             d: npt.NDArray[np.float64], w: float,
+            a: float, b: float,
             max_iters: int = 10
             ) -> npt.NDArray[np.float64]:
-        '''Project x_k onto {x | d @ x <= w} ∩ {x | x >= 0} using
+        '''Project x_k onto {x | d @ x <= w} ∩ {x | a <= x <= b} using
         an alternating projections algo
 
         :param x_i: the original vector, possibly not in the constraint set
         :param d: vector in {x | d @ x <= w}
         :param w: scalar in {x | d @ x <= w}
         :param max_iters: only do at most this many alternating projections'''
-        if np.all(x_i >= 0) and d @ x_i <= w:
-            self.logger.debug(f'No projections needed on {x_i=}')
+        if np.all((a <= x_i) & (x_i <= b)) and d @ x_i <= w:
             return x_i
         for _ in range(max_iters):
             x_intermediate = self.project_onto_halfspace(x_i, d, w)
@@ -98,11 +98,10 @@ class ProjectedSGD:
             stochastic_samples = self.stochastic_sampler(batch_size)
             gradient_components = self.gradient_func(x_k, stochastic_samples)
             avg_gradient = np.mean(gradient_components, axis=0)
-            # self.logger.debug(f'{avg_gradient=}')
             cur_stepsize = self.stepsize_class.get_stepsize(
                 cur_iter, avg_gradient)
-            self.logger.debug(f'{cur_stepsize=}')
             x_k = x_k - cur_stepsize * avg_gradient
-            x_k = self.run_alternating_projections_on(x_k, self.d, self.w)
+            x_k = self.run_alternating_projections_on(
+                x_k, self.d, self.w, self.lower_bound, self.upper_bound)
             iterate_hist_list.append(x_k)
         return np.array(iterate_hist_list)
