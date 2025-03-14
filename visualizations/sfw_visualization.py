@@ -198,17 +198,20 @@ def get_pg_stepsizes_iterate_histories(
 
 
 def main():
-    ITERATE_DIM = 2
+    ITERATE_DIM = 25
 
     d = np.ones(ITERATE_DIM)
     w = 1
     lower_bound = 0
     upper_bound = 0.75
 
-    true_opt = np.array([0.75, 0.25])
+    rng = np.random.default_rng(1234)
+    true_opt = rng.uniform(size=ITERATE_DIM)
+    true_opt /= sum(true_opt)
+    scales = rng.uniform(0, 2, size=ITERATE_DIM)
 
     sampling_dist: ss.rv_continuous = \
-        ss.t(df=4, loc=true_opt, scale=1)  # type: ignore
+        ss.t(df=4, loc=true_opt, scale=scales)  # type: ignore
     stochastic_sampling_func = ft.partial(
         stochastic_sampler, sampling_dist=sampling_dist,
         ndim=ITERATE_DIM)
