@@ -11,18 +11,21 @@ class ProjectedSGD:
     '''Instead of solving the Stochastic Frank-Wolfe linear program at every
     iteration, try instead doing gradient updates, then projecting onto
     the constraint set\n
-    pg 867: For constraints = {x | d @ x <= w} ∩ {x | x >= 0}, the projection
-    should be quickly achievable'''
+    pg 867: For constraints = {x | d @ x <= w} ∩ {x | a <= x <= b}, the
+    projection should be quickly achievable'''
     def __init__(self, d: npt.NDArray[np.float64], w: float,
+                 a: float, b: float,
                  gradient: Callable[[npt.NDArray[np.float64],
                                      npt.NDArray[np.float64]],
                                     npt.NDArray[np.float64]],
                  stochastic_sampler: Callable[[int], npt.NDArray[np.float64]],
                  stepsize_class_name: str = 'OneOverTStepsize'):
-        '''Given that our domain is {x | d @ x <= w, x >= 0}
+        '''Given that our domain is {x | d @ x <= w, a <= x <= b}
 
         :param d: param vector for the above constraint
         :param w: float for the above constraint
+        :param a: coordinate-wise lower bound on the constraint
+        :param b: coordinate-wise upper bound on the constraint
         :param gradient: function that takes in the current iterate x_k and
             a batch of samples from the stochastic_sampler. Returns gradient
             of the objective wrt x for each sample
@@ -37,6 +40,10 @@ class ProjectedSGD:
         '''Weighted inner product vector in constraints'''
         self.w = w
         '''Weighted inner product total in constraints'''
+        self.lower_bound = a
+        '''For feasible x, we must have self.lower_bound <= x (all coords)'''
+        self.upper_bound = b
+        '''For feasible x, we must have x <= self.upper_bound (all coords)'''
         self.gradient_func = gradient
         self.stochastic_sampler = stochastic_sampler
         self.first_order_suboptimality_bound = 1e-5
@@ -71,7 +78,7 @@ class ProjectedSGD:
             return x_i
         for _ in range(max_iters):
             x_intermediate = self.project_onto_halfspace(x_i, d, w)
-            x_i = np.maximum(x_intermediate, 0)
+            x_i = np.clip(x_intermediate, self.lower_bound, self.upper_bound)
             if d @ x_i <= w:
                 break
         return x_i

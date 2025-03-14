@@ -9,9 +9,7 @@ import scipy.stats as ss  # type: ignore
 import matplotlib.pyplot as plt
 import sys
 sys.path.append('C:/stochastic_programming')
-from StochasticFrankWolfe import StochasticFrankWolfe  # noqa: E402
 from ProjectedSGD import ProjectedSGD  # noqa: E402
-from StochasticNewton import StochasticNewton  # noqa: E402
 from logger import get_logger  # noqa: E402
 from helper_functions import timing  # noqa: E402
 
@@ -75,31 +73,34 @@ def stochastic_sampler(num_samples: int,
 def satisfies_constraints(
         grid: npt.NDArray[np.float64],
         d: npt.NDArray[np.float64], w: float,
+        a: float, b: float,
         ) -> npt.NDArray[np.bool_]:
     '''Given a grid of points, let return[i, j] = True iff the point
     at grid[i, j, :] falls within the given constraints
 
     :param grid: .shape = (x discretization, y discretization, 2)
-    :param d: vector of the set {x | d @ x <= w, x >= 0}
+    :param d: vector of the set {x | d @ x <= w, a <= x <= b}
     :param w: see above
+    :param a: see above
+    :param b: see above
     :return: return[i, j] = True iff the point
         at grid[i, j, :] falls within the given constraints
     '''
     d_grid = np.squeeze(d @ grid[..., None], axis=-1)
     logger.debug(f'{d_grid.shape=}')
     constraints_satisfied: npt.NDArray[np.bool_] = np.all(
-        grid >= 0, axis=-1) & (d_grid <= w)
+        (a <= grid) & (grid <= b), axis=-1) & (d_grid <= w)
     return constraints_satisfied
 
 
 def plot_iterates_on_contour(
         iterate_histories: dict[str, npt.NDArray[np.float64]],
-        d: npt.NDArray[np.float64], w: float,
+        d: npt.NDArray[np.float64], w: float, a: float, b: float,
         sampling_dist: ss.rv_continuous,
         x_lim: tuple[float, float] = (0, 1),
         y_lim: tuple[float, float] = (0, 1)):
     '''Make a contour plot of the true function along with the
-    constraint set {x | d @ x <= w, x >= 0}\n
+    constraint set {x | d @ x <= w, a <= x <= b}\n
     Then, plot iterate histories, where each is keyed by a string
         that references its hyperparam combo
 
@@ -118,7 +119,7 @@ def plot_iterates_on_contour(
     X, Y = np.meshgrid(x_space, y_space)
     grid = np.dstack((X, Y))
 
-    constraints_satisfied = satisfies_constraints(grid, d, w)
+    constraints_satisfied = satisfies_constraints(grid, d, w, a, b)
     ax.contourf(X, Y, constraints_satisfied, levels=[1-1e-7, 1+1e-7],
                 colors=['lightblue'])
 
@@ -169,44 +170,9 @@ def plot_convergence_to_optimal(
     ax2.set_yscale('log')
 
 
-def get_sfw_vs_pg_iterate_histories(
-        d: npt.NDArray[np.float64], w: float,
-        x_0: npt.NDArray[np.float64],
-        stochastic_sampling_func: Callable[[int], npt.NDArray[np.float64]]
-        ) -> dict[str, npt.NDArray[np.float64]]:
-    '''Return iterate histories to compare Stochastic Frank Wolfe convergence
-    with Projected Stochastic Gradient Descent convergence
-
-    :param d: vector in {x | d @ x <= w}
-    :param w: scalar in {x | d @ x <= w}
-    :param x_0: initial iterate
-    :param stochastic_sampling_func: function that takes in the number of
-            samples, returns samples of the stochastic component
-    :return: dict of (plot label, iterate history)
-    '''
-    sfw_instance = StochasticFrankWolfe(
-        d, w, gradient_func, stochastic_sampling_func)
-    pg_instance = ProjectedSGD(
-        d, w, gradient_func, stochastic_sampling_func)
-
-    iterate_history = timing(sfw_instance.iterate_from)(
-        x_0, batch_size=10, num_iters=(n_iters := 5000))
-    logger.debug(f'iterate_history=\n{iterate_history}')
-    large_batch_iterate_history = timing(sfw_instance.iterate_from)(
-        x_0, batch_size=100, num_iters=n_iters)
-    large_batch_pg_hist = timing(pg_instance.iterate_from)(
-        x_0, batch_size=100, num_iters=n_iters)
-
-    iterate_histories = {
-        'vanilla': iterate_history,
-        'large_batch': large_batch_iterate_history,
-        'large_batch_pg': large_batch_pg_hist,
-    }
-    return iterate_histories
-
-
 def get_pg_stepsizes_iterate_histories(
         d: npt.NDArray[np.float64], w: float,
+        a: float, b: float,
         x_0: npt.NDArray[np.float64],
         stochastic_sampling_func: Callable[[int], npt.NDArray[np.float64]]
         ) -> dict[str, npt.NDArray[np.float64]]:
@@ -222,60 +188,39 @@ def get_pg_stepsizes_iterate_histories(
     iterate_histories: dict[str, npt.NDArray[np.float64]] = {}
     for stepsize_class_name in stepsize_class_names:
         pg_instance = ProjectedSGD(
-            d, w, gradient_func, stochastic_sampling_func)
+            d, w, a, b,
+            gradient_func, stochastic_sampling_func)
         cur_hist = timing(pg_instance.iterate_from)(
             x_0, batch_size=100, num_iters=5000)
         iterate_histories[stepsize_class_name] = cur_hist
     return iterate_histories
 
 
-def get_pg_v_newton_iterate_histories(
-        d: npt.NDArray[np.float64], w: float,
-        x_0: npt.NDArray[np.float64],
-        stochastic_sampling_func: Callable[[int], npt.NDArray[np.float64]]
-        ) -> dict[str, npt.NDArray[np.float64]]:
-    '''Return iterate histories to compare Projected SGD with
-    Projected Newton's'''
-    pg_instance = ProjectedSGD(
-        d, w, gradient_func, stochastic_sampling_func)
-    newton_instance = StochasticNewton(
-        d, w, gradient_func, hessian_func, stochastic_sampling_func
-    )
-    pg_hist = timing(pg_instance.iterate_from)(
-        x_0, batch_size=10, num_iters=5000)
-    newton_hist = timing(newton_instance.iterate_from)(
-        x_0, batch_size=10, num_iters=5000)
-    iterate_histories = {
-        'Projected SGD': pg_hist,
-        'Projected Newton': newton_hist,
-    }
-    return iterate_histories
-
-
 def main():
-    ITERATE_DIM = 25
+    ITERATE_DIM = 2
 
     d = np.ones(ITERATE_DIM)
     w = 1
+    lower_bound = 0
+    upper_bound = 0.75
+
+    true_opt = 0.5
 
     sampling_dist: ss.rv_continuous = \
-        ss.t(df=4, loc=1/(ITERATE_DIM*2), scale=1)  # type: ignore
+        ss.t(df=4, loc=true_opt, scale=1)  # type: ignore
     stochastic_sampling_func = ft.partial(
         stochastic_sampler, sampling_dist=sampling_dist,
         ndim=ITERATE_DIM)
 
-    x_0 = np.insert(np.zeros(ITERATE_DIM-1), 0, 1)
+    x_0 = np.insert(np.zeros(ITERATE_DIM-1), 0, upper_bound)
     # x_0 = np.full(ITERATE_DIM, 0.5)
 
-    # iterate_histories = get_sfw_vs_pg_iterate_histories(
-    #     d, w, x_0, stochastic_sampling_func)
     iterate_histories = get_pg_stepsizes_iterate_histories(
-        d, w, x_0, stochastic_sampling_func)
-    # iterate_histories = get_pg_v_newton_iterate_histories(
-    #     d, w, x_0, stochastic_sampling_func)
+        d, w, lower_bound, upper_bound,
+        x_0, stochastic_sampling_func)
 
     plot_iterates_on_contour(
-        iterate_histories, d, w, sampling_dist)
+        iterate_histories, d, w, lower_bound, upper_bound, sampling_dist)
     plot_convergence_to_optimal(iterate_histories, sampling_dist)
     plt.show()
 
