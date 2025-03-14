@@ -5,6 +5,7 @@ from typing import Callable
 import numpy as np
 import numpy.typing as npt
 import scipy.stats as ss  # type: ignore
+import cvxpy as cp
 
 import matplotlib.pyplot as plt
 import sys
@@ -31,6 +32,24 @@ def true_function(x: npt.NDArray[np.float64],
     raw_seconds = sampling_dist.moment(2)
     E_WTW = sum(raw_seconds**2)
     return inner_products - 2 * x @ E_W + E_WTW
+
+
+def get_true_opt(sampling_dist: ss.rv_continuous,
+                 d: npt.NDArray[np.float64], w: float, a: float, b: float,
+                 ) -> npt.NDArray[np.float64]:
+    '''Solve for the true min objective value over
+    {x | d @ x <= w, a <= x <= b}
+    This quadratic program can be handled with cvxpy
+
+    :return: the true min objective'''
+    iterate_dim = len(d)
+    E_W = np.broadcast_to(sampling_dist.mean(), iterate_dim)
+    x = cp.Variable(2)
+    constraints = [a <= x, x <= b, d @ x <= w]
+    objective = cp.Minimize(cp.sum_squares(x) - 2 * x @ E_W)
+    prob = cp.Problem(objective, constraints)  # type: ignore
+    prob.solve(solver=cp.CLARABEL)
+    return x.value  # type: ignore
 
 
 def gradient_func(iterate: npt.NDArray[np.float64],
@@ -96,8 +115,8 @@ def satisfies_constraints(
 
 def plot_iterates_on_contour(
         iterate_histories: dict[str, npt.NDArray[np.float64]],
-        d: npt.NDArray[np.float64], w: float, a: float, b: float,
         sampling_dist: ss.rv_continuous,
+        d: npt.NDArray[np.float64], w: float, a: float, b: float,
         x_lim: tuple[float, float] = (0, 1),
         y_lim: tuple[float, float] = (0, 1)):
     '''Make a contour plot of the true function along with the
@@ -132,6 +151,10 @@ def plot_iterates_on_contour(
     true_func_values = true_function(grid, sampling_dist)
     plt.contour(X, Y, true_func_values, levels=30)
 
+    true_argmin = get_true_opt(sampling_dist, d, w, a, b)
+    print(f'{true_argmin=}')
+    plt.plot(*true_argmin, marker='x', color='red')
+
     ax.set_aspect('equal')
     ax.set_title('Stochastic Frank Wolfe iterate histories')
     ax.legend()
@@ -140,12 +163,16 @@ def plot_iterates_on_contour(
 
 def plot_convergence_to_optimal(
         iterate_histories: dict[str, npt.NDArray[np.float64]],
-        sampling_dist: ss.rv_continuous):
+        sampling_dist: ss.rv_continuous,
+        d: npt.NDArray[np.float64], w: float, a: float, b: float,):
     '''I can get the optimal x* from the sampling_dist moments
     Plot the l2-norm differences between each iterate history
         and the optimal (labeled by the dict key)\n
     Also plot the convergence of the objective function value to
-        the optimal'''
+        the optimal
+
+    pg 884: I need the constraint parameters so I can use cvxpy to
+        get the true optimal'''
     _, axes = plt.subplots(1, 2)
     ax1: plt.Axes = axes[0]
     ax2: plt.Axes = axes[1]
@@ -157,7 +184,7 @@ def plot_convergence_to_optimal(
     ax2.set_title('Objective func excesses between iterates & the optimal')
 
     for history_name, iterate_history in iterate_histories.items():
-        x_star = np.full(iterate_history.shape[1], sampling_dist.mean())
+        x_star = get_true_opt(sampling_dist, d, w, a, b)
         logger.debug(f'{sampling_dist.mean()=}\n -> {x_star=}')
         norm_diffs = np.linalg.norm(iterate_history - x_star, axis=1)
         ax1.plot(norm_diffs, label=history_name)
@@ -207,7 +234,7 @@ def main():
     upper_bound = 0.75
 
     seed = np.random.default_rng().integers(int(1e5), int(1e8))
-    # seed = 1234
+    seed = 38612000
     print(f'{seed=}')
     rng = np.random.default_rng(seed)
     true_opt = rng.uniform(size=ITERATE_DIM)
@@ -221,15 +248,17 @@ def main():
         ndim=ITERATE_DIM)
 
     x_0 = np.insert(np.zeros(ITERATE_DIM-1), 0, upper_bound)
-    # x_0 = np.full(ITERATE_DIM, 0.5)
 
     iterate_histories = get_pg_stepsizes_iterate_histories(
         d, w, lower_bound, upper_bound,
         x_0, stochastic_sampling_func)
 
     plot_iterates_on_contour(
-        iterate_histories, d, w, lower_bound, upper_bound, sampling_dist)
-    plot_convergence_to_optimal(iterate_histories, sampling_dist)
+        iterate_histories, sampling_dist,
+        d, w, lower_bound, upper_bound)
+    plot_convergence_to_optimal(
+        iterate_histories, sampling_dist,
+        d, w, lower_bound, upper_bound)
     plt.show()
 
 
