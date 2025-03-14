@@ -78,7 +78,7 @@ class ProjectedSGD:
             return x_i
         for _ in range(max_iters):
             x_intermediate = self.project_onto_halfspace(x_i, d, w)
-            x_i = np.clip(x_intermediate, self.lower_bound, self.upper_bound)
+            x_i = np.clip(x_intermediate, a, b)
             if d @ x_i <= w:
                 break
         return x_i
