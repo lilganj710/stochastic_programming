@@ -158,6 +158,7 @@ def plot_convergence_to_optimal(
 
     for history_name, iterate_history in iterate_histories.items():
         x_star = np.full(iterate_history.shape[1], sampling_dist.mean())
+        logger.debug(f'{sampling_dist.mean()=}\n -> {x_star=}')
         norm_diffs = np.linalg.norm(iterate_history - x_star, axis=1)
         ax1.plot(norm_diffs, label=history_name)
 
@@ -198,14 +199,17 @@ def get_pg_stepsizes_iterate_histories(
 
 
 def main():
-    ITERATE_DIM = 25
+    ITERATE_DIM = 2
 
     d = np.ones(ITERATE_DIM)
     w = 1
     lower_bound = 0
     upper_bound = 0.75
 
-    rng = np.random.default_rng(1234)
+    seed = np.random.default_rng().integers(int(1e5), int(1e8))
+    # seed = 1234
+    print(f'{seed=}')
+    rng = np.random.default_rng(seed)
     true_opt = rng.uniform(size=ITERATE_DIM)
     true_opt /= sum(true_opt)
     scales = rng.uniform(0, 2, size=ITERATE_DIM)
