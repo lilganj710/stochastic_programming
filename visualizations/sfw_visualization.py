@@ -44,7 +44,7 @@ def get_true_opt(sampling_dist: ss.rv_continuous,
     :return: the true min objective'''
     iterate_dim = len(d)
     E_W = np.broadcast_to(sampling_dist.mean(), iterate_dim)
-    x = cp.Variable(2)
+    x = cp.Variable(iterate_dim)
     constraints = [a <= x, x <= b, d @ x <= w]
     objective = cp.Minimize(cp.sum_squares(x) - 2 * x @ E_W)
     prob = cp.Problem(objective, constraints)  # type: ignore
@@ -226,7 +226,7 @@ def get_pg_stepsizes_iterate_histories(
 
 
 def main():
-    ITERATE_DIM = 2
+    ITERATE_DIM = 25
 
     d = np.ones(ITERATE_DIM)
     w = 1
@@ -234,7 +234,6 @@ def main():
     upper_bound = 0.75
 
     seed = np.random.default_rng().integers(int(1e5), int(1e8))
-    seed = 38612000
     print(f'{seed=}')
     rng = np.random.default_rng(seed)
     true_opt = rng.uniform(size=ITERATE_DIM)
@@ -247,7 +246,11 @@ def main():
         stochastic_sampler, sampling_dist=sampling_dist,
         ndim=ITERATE_DIM)
 
-    x_0 = np.insert(np.zeros(ITERATE_DIM-1), 0, upper_bound)
+    extra_x0_factor = rng.uniform(1, 10)
+    x_0 = (
+        (uniforms := rng.uniform(size=ITERATE_DIM))
+        / (sum(uniforms)*extra_x0_factor)
+    )
 
     iterate_histories = get_pg_stepsizes_iterate_histories(
         d, w, lower_bound, upper_bound,
