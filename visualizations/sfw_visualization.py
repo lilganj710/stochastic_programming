@@ -23,12 +23,13 @@ def true_function(x: npt.NDArray[np.float64],
 
     :param x: .shape = (num inputs, iterate dim)
     :param sampling_dist: sampling distribution for W
-    :return: one function output for each row of the vectorized input'''
+    :return: one function output for each last axis of the vectorized input'''
     x = np.atleast_2d(x)
     iterate_dim = x.shape[-1]
-    inner_products = np.sum(x**2, axis=-1)
-    E_W = np.full(iterate_dim, sampling_dist.mean())
-    E_WTW = sampling_dist.moment(2) * 2
+    inner_products: npt.NDArray[np.float64] = np.sum(x**2, axis=-1)
+    E_W = np.broadcast_to(sampling_dist.mean(), iterate_dim)
+    raw_seconds = sampling_dist.moment(2)
+    E_WTW = sum(raw_seconds**2)
     return inner_products - 2 * x @ E_W + E_WTW
 
 
@@ -204,7 +205,7 @@ def main():
     lower_bound = 0
     upper_bound = 0.75
 
-    true_opt = 0.5
+    true_opt = np.array([0.75, 0.25])
 
     sampling_dist: ss.rv_continuous = \
         ss.t(df=4, loc=true_opt, scale=1)  # type: ignore
