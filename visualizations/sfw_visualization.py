@@ -6,7 +6,6 @@ import numpy as np
 import numpy.typing as npt
 import scipy.stats as ss  # type: ignore
 import cvxpy as cp
-import cvxpy as cp
 
 import matplotlib.pyplot as plt
 import sys
@@ -33,6 +32,24 @@ def true_function(x: npt.NDArray[np.float64],
     raw_seconds = sampling_dist.moment(2)
     E_WTW = sum(raw_seconds**2)
     return inner_products - 2 * x @ E_W + E_WTW
+
+
+def get_true_opt(sampling_dist: ss.rv_continuous,
+                 d: npt.NDArray[np.float64], w: float, a: float, b: float,
+                 ) -> npt.NDArray[np.float64]:
+    '''Solve for the true min objective value over
+    {x | d @ x <= w, a <= x <= b}
+    This quadratic program can be handled with cvxpy
+
+    :return: the true min objective'''
+    iterate_dim = len(d)
+    E_W = np.broadcast_to(sampling_dist.mean(), iterate_dim)
+    x = cp.Variable(iterate_dim)
+    constraints = [a <= x, x <= b, d @ x <= w]
+    objective = cp.Minimize(cp.sum_squares(x) - 2 * x @ E_W)
+    prob = cp.Problem(objective, constraints)  # type: ignore
+    prob.solve(solver=cp.CLARABEL)
+    return x.value  # type: ignore
 
 
 def gradient_func(iterate: npt.NDArray[np.float64],
@@ -217,7 +234,6 @@ def main():
     upper_bound = 0.75
 
     seed = np.random.default_rng().integers(int(1e5), int(1e8))
-    # seed = 1234
     print(f'{seed=}')
     rng = np.random.default_rng(seed)
     true_opt = rng.uniform(size=ITERATE_DIM)
@@ -230,8 +246,11 @@ def main():
         stochastic_sampler, sampling_dist=sampling_dist,
         ndim=ITERATE_DIM)
 
-    x_0 = np.insert(np.zeros(ITERATE_DIM-1), 0, upper_bound)
-    # x_0 = np.full(ITERATE_DIM, 0.5)
+    extra_x0_factor = rng.uniform(1, 10)
+    x_0 = (
+        (uniforms := rng.uniform(size=ITERATE_DIM))
+        / (sum(uniforms)*extra_x0_factor)
+    )
 
     iterate_histories = get_pg_stepsizes_iterate_histories(
         d, w, lower_bound, upper_bound,
