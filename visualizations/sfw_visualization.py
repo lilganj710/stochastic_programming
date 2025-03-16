@@ -2,6 +2,7 @@
 low-dimensional setting'''
 import functools as ft
 from typing import Callable
+import itertools as it
 import numpy as np
 import numpy.typing as npt
 import scipy.stats as ss  # type: ignore
@@ -10,7 +11,7 @@ import cvxpy as cp
 import matplotlib.pyplot as plt
 import sys
 sys.path.append('C:/stochastic_programming')
-from ProjectedSGD import ProjectedSGD  # noqa: E402
+from ProjectedSGD import ProjectedSGD, ProjectedSGDHistory  # noqa: E402
 from logger import get_logger  # noqa: E402
 from helper_functions import timing  # noqa: E402
 
@@ -114,7 +115,7 @@ def satisfies_constraints(
 
 
 def plot_iterates_on_contour(
-        iterate_histories: dict[str, npt.NDArray[np.float64]],
+        pSGD_histories: dict[str, ProjectedSGDHistory],
         sampling_dist: ss.rv_continuous,
         d: npt.NDArray[np.float64], w: float, a: float, b: float,
         x_lim: tuple[float, float] = (0, 1),
@@ -143,7 +144,8 @@ def plot_iterates_on_contour(
     ax.contourf(X, Y, constraints_satisfied, levels=[1-1e-7, 1+1e-7],
                 colors=['lightblue'])
 
-    for history_name, iterate_history in iterate_histories.items():
+    for history_name, pSGD_history in pSGD_histories.items():
+        iterate_history = pSGD_history.iterate_history
         ax.scatter(iterate_history[:, 0], iterate_history[:, 1],
                    label=history_name)
         ax.annotate('x_0', iterate_history[0])
@@ -161,8 +163,23 @@ def plot_iterates_on_contour(
     plt.colorbar(label='True func values')
 
 
+def set_convergence_axes_labels(axes: list[list[plt.Axes]]):
+    '''With the gradient & projected gradient convergence plots,
+    I'll have 4 different axes. Let's label them all here'''
+    for ax in list(it.chain.from_iterable(axes)):
+        ax.set_xlabel('Iterate number')
+    axes[0][0].set_ylabel('l2-norm difference from x*')
+    axes[0][0].set_title('l2-norm differences between iterates & optimal')
+    axes[0][1].set_ylabel('log(E[f(x_k)] - f(x)) (objective excesses)')
+    axes[0][1].set_title('Objective func excesses between iterates & optimal')
+    axes[1][0].set_ylabel('Gradient norms')
+    axes[1][0].set_title('Stochastic gradient norms over iteration')
+    axes[1][1].set_ylabel('Projected gradient norms')
+    axes[1][1].set_title('Projected stochastic gradient norms over iteration')
+
+
 def plot_convergence_to_optimal(
-        iterate_histories: dict[str, npt.NDArray[np.float64]],
+        pSGD_histories: dict[str, ProjectedSGDHistory],
         sampling_dist: ss.rv_continuous,
         d: npt.NDArray[np.float64], w: float, a: float, b: float,):
     '''I can get the optimal x* from the sampling_dist moments
@@ -172,31 +189,35 @@ def plot_convergence_to_optimal(
         the optimal
 
     pg 884: I need the constraint parameters so I can use cvxpy to
-        get the true optimal'''
-    _, axes = plt.subplots(1, 2)
-    ax1: plt.Axes = axes[0]
-    ax2: plt.Axes = axes[1]
-    ax1.set_xlabel('Iterate number')
-    ax1.set_ylabel('l2-norm difference from x*')
-    ax1.set_title('l2-norm differences between iterates & the optimal')
-    ax2.set_xlabel('Iterate number')
-    ax2.set_ylabel('log(E[f(x_k)] - f(x)) (objective excesses)')
-    ax2.set_title('Objective func excesses between iterates & the optimal')
+        get the true optimal
+    pg 885: Also plot gradient & projected gradient norms'''
+    _, axes = plt.subplots(2, 2)  # type: ignore
+    axes: list[list[plt.Axes]] = list(axes)
+    set_convergence_axes_labels(axes)
 
-    for history_name, iterate_history in iterate_histories.items():
+    for history_name, pSGD_history in pSGD_histories.items():
+        iterate_history = pSGD_history.iterate_history
         x_star = get_true_opt(sampling_dist, d, w, a, b)
         logger.debug(f'{sampling_dist.mean()=}\n -> {x_star=}')
         norm_diffs = np.linalg.norm(iterate_history - x_star, axis=1)
-        ax1.plot(norm_diffs, label=history_name)
+        axes[0][0].plot(norm_diffs, label=history_name)
 
         true_objectives = true_function(iterate_history, sampling_dist)
         optimal_objective = true_function(x_star, sampling_dist)
         objective_excesses = true_objectives - optimal_objective
-        ax2.plot(objective_excesses, label=history_name)
+        axes[0][1].plot(objective_excesses, label=history_name)
 
-    ax1.legend()
-    ax2.legend()
-    ax2.set_yscale('log')
+        gradient_norms = np.linalg.norm(
+            pSGD_history.gradient_history, axis=-1)
+        projected_gradient_norms = np.linalg.norm(
+            pSGD_history.projected_gradient_history, axis=-1)
+        logger.debug(pSGD_history.projected_gradient_history)
+        axes[1][0].plot(gradient_norms, label=history_name)
+        axes[1][1].plot(projected_gradient_norms, label=history_name)
+
+    for ax in list(it.chain.from_iterable(axes)):
+        ax.legend()
+    axes[0][1].set_yscale('log')
 
 
 def get_pg_stepsizes_iterate_histories(
@@ -204,17 +225,18 @@ def get_pg_stepsizes_iterate_histories(
         a: float, b: float,
         x_0: npt.NDArray[np.float64],
         stochastic_sampling_func: Callable[[int], npt.NDArray[np.float64]]
-        ) -> dict[str, npt.NDArray[np.float64]]:
+        ) -> dict[str, ProjectedSGDHistory]:
     '''Return iterate histories to compare convergence of different stepsize
     rules for Projected Stochastic Gradient Descent
+
+    Nothing seems to outperform the OneOverTStepsize...
 
     :return: dict of (plot label, iterate history)
     '''
     stepsize_class_names = [
-        'OneOverTStepsize',
-        'MultivariateKestenStepsize'
+        'OneOverTStepsize'
     ]
-    iterate_histories: dict[str, npt.NDArray[np.float64]] = {}
+    iterate_histories: dict[str, ProjectedSGDHistory] = {}
     for stepsize_class_name in stepsize_class_names:
         pg_instance = ProjectedSGD(
             d, w, a, b,
@@ -226,7 +248,7 @@ def get_pg_stepsizes_iterate_histories(
 
 
 def main():
-    ITERATE_DIM = 25
+    ITERATE_DIM = 2
 
     d = np.ones(ITERATE_DIM)
     w = 1
@@ -238,7 +260,7 @@ def main():
     rng = np.random.default_rng(seed)
     true_opt = rng.uniform(size=ITERATE_DIM)
     true_opt /= sum(true_opt)
-    scales = rng.uniform(0, 2, size=ITERATE_DIM)
+    scales = rng.uniform(0, 2e-1, size=ITERATE_DIM)
 
     sampling_dist: ss.rv_continuous = \
         ss.t(df=4, loc=true_opt, scale=scales)  # type: ignore
@@ -252,15 +274,15 @@ def main():
         / (sum(uniforms)*extra_x0_factor)
     )
 
-    iterate_histories = get_pg_stepsizes_iterate_histories(
+    pSGD_histories = get_pg_stepsizes_iterate_histories(
         d, w, lower_bound, upper_bound,
         x_0, stochastic_sampling_func)
 
     plot_iterates_on_contour(
-        iterate_histories, sampling_dist,
+        pSGD_histories, sampling_dist,
         d, w, lower_bound, upper_bound)
     plot_convergence_to_optimal(
-        iterate_histories, sampling_dist,
+        pSGD_histories, sampling_dist,
         d, w, lower_bound, upper_bound)
     plt.show()
 

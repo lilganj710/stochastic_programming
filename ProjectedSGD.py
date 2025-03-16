@@ -1,10 +1,23 @@
 import logging
 from typing import Callable
+from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
 from stepsize_rules.projected_SGD_stepsizes import ProjectedSGDStepsize
 from subclass_instantiation import get_class_instance
+
+
+@dataclass
+class ProjectedSGDHistory:
+    '''Stores information about a run of the ProjectedSGD algo'''
+    iterate_history: npt.NDArray[np.float64]
+    '''History of the iterates'''
+    gradient_history: npt.NDArray[np.float64]
+    '''Sample average gradient history'''
+    projected_gradient_history: npt.NDArray[np.float64]
+    '''Results from projecting those sample avg gradients onto the
+    constraint set'''
 
 
 class ProjectedSGD:
@@ -85,23 +98,35 @@ class ProjectedSGD:
 
     def iterate_from(self, x_0: npt.NDArray[np.float64],
                      batch_size: int = 10, num_iters: int = 50
-                     ) -> npt.NDArray[np.float64]:
+                     ) -> ProjectedSGDHistory:
         '''Perform num_iters of this Stochastic Frank Wolfe instance starting
         from x_0
 
         :param batch_size: num samples to draw from the stochastic_sampler
             in computing the stochastic_gradient
-        :return: the iterate history'''
+        :return: info about this iteration, wrapped in the above dataclass'''
         x_k = x_0
         iterate_hist_list: list[npt.NDArray[np.float64]] = [x_0]
+        gradient_hist_list: list[npt.NDArray[np.float64]] = []
+        projected_gradient_hist_list: list[npt.NDArray[np.float64]] = []
         for cur_iter in range(1, num_iters+1):
             stochastic_samples = self.stochastic_sampler(batch_size)
             gradient_components = self.gradient_func(x_k, stochastic_samples)
             avg_gradient = np.mean(gradient_components, axis=0)
+            gradient_hist_list.append(avg_gradient)
             cur_stepsize = self.stepsize_class.get_stepsize(
                 cur_iter, avg_gradient)
             x_k = x_k - cur_stepsize * avg_gradient
             x_k = self.run_alternating_projections_on(
                 x_k, self.d, self.w, self.lower_bound, self.upper_bound)
             iterate_hist_list.append(x_k)
-        return np.array(iterate_hist_list)
+            projected_gradient = self.run_alternating_projections_on(
+                avg_gradient, self.d, self.w,
+                self.lower_bound, self.upper_bound
+            )
+            projected_gradient_hist_list.append(projected_gradient)
+        return ProjectedSGDHistory(
+            np.array(iterate_hist_list),
+            np.array(gradient_hist_list),
+            np.array(projected_gradient_hist_list)
+        )
